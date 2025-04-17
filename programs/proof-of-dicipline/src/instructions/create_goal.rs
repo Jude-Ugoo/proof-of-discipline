@@ -1,6 +1,6 @@
 use anchor_lang::{prelude::*, system_program::{transfer, Transfer}};
 
-use crate::GoalAccount;
+use crate::{GoalAccount, errors::ErrorCode};
 
 #[derive(Accounts)]
 #[instruction(goal_id: String)]
@@ -27,13 +27,15 @@ pub struct CreateGoal<'info> {
     pub system_program: Program<'info, System>,
 }
 
-pub fn create_goal(
+pub fn create_user_goal(
     ctx: Context<CreateGoal>,
     goal_id: String,
     description: String,
     stake_amount: u64,
     duration_days: u32,
 ) -> Result<()> {
+    require!(stake_amount > 0, ErrorCode::InvalidStakeAmount);
+
     let goal = &mut ctx.accounts.goal_account;
 
     goal.owner = ctx.accounts.user.key();

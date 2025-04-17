@@ -16,7 +16,7 @@ pub struct Initialize<'info> {
     pub system_program: Program<'info, System>,
 }
 
-pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
+pub fn initialize_program(ctx: Context<Initialize>) -> Result<()> {
     let program_state = &mut ctx.accounts.program_state;
 
     program_state.admin = ctx.accounts.admin.key();
