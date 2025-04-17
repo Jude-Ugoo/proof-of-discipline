@@ -7,7 +7,6 @@ pub mod state;
 pub use state::*;
 
 pub mod errors;
-pub use errors::*;
 
 declare_id!("CBahuq4hPsMgdgqqM7f63BC1spvAvANWHhuhmCcz9F3u");
 
@@ -27,5 +26,9 @@ pub mod proof_of_dicipline {
         duration_days: u32,
     ) -> Result<()> {
         create_goal::create_user_goal(ctx, goal_id, description, stake_amount, duration_days)
+    }
+
+    pub fn check_in(ctx: Context<CheckIn>) -> Result<()> {
+        check_in::user_check_in(ctx)
     }
 }

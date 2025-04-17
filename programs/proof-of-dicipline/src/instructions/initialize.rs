@@ -8,11 +8,14 @@ pub struct Initialize<'info> {
         init,
         payer = admin,
         space = 8 + ProgramState::INIT_SPACE,
+        seeds = [b"program_state"],
+        bump
     )]
     pub program_state: Account<'info, ProgramState>,
 
     #[account(mut)]
     pub admin: Signer<'info>,
+
     pub system_program: Program<'info, System>,
 }
 
