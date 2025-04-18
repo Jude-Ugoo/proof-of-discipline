@@ -3,10 +3,10 @@ import { Program } from "@coral-xyz/anchor";
 import { ProofOfDicipline } from "../target/types/proof_of_dicipline";
 import { Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram } from "@solana/web3.js";
 // import { TOKEN_PROGRAM_ID } from "@coral-xyz/anchor/dist/cjs/utils/token";
-import { 
-  TOKEN_PROGRAM_ID, 
-  createMint as createTokenMint, 
-  ASSOCIATED_TOKEN_PROGRAM_ID, 
+import {
+  TOKEN_PROGRAM_ID,
+  createMint as createTokenMint,
+  ASSOCIATED_TOKEN_PROGRAM_ID,
   TokenAccountNotFoundError,
   getAssociatedTokenAddress,
   createAssociatedTokenAccountInstruction
@@ -49,7 +49,7 @@ describe("proof-of-dicipline", () => {
   async function createMint(authority: Keypair): Promise<Keypair> {
     const mint = Keypair.generate();
     const lamports = await provider.connection.getMinimumBalanceForRentExemption(82);
-    
+
     const tx = new anchor.web3.Transaction().add(
       SystemProgram.createAccount({
         fromPubkey: authority.publicKey,
@@ -59,7 +59,7 @@ describe("proof-of-dicipline", () => {
         programId: TOKEN_PROGRAM_ID,
       })
     );
-    
+
     await provider.sendAndConfirm(tx, [mint]);
     await createTokenMint(
       provider.connection,
@@ -69,7 +69,6 @@ describe("proof-of-dicipline", () => {
       9,
       mint
     );
-    
     return mint;
   }
 
@@ -97,7 +96,7 @@ describe("proof-of-dicipline", () => {
     return tokenAccount;
   }
 
-  // Helper function to advance time 
+  // Helper function to advance time
   async function advanceTime(seconds: number) {
     console.log(`⏳ Waiting ${seconds} seconds to simulate time passing...`);
     return new Promise<void>((resolve) => setTimeout(resolve, seconds * 1000));
@@ -120,13 +119,11 @@ describe("proof-of-dicipline", () => {
     program.programId
    )[0]
 
-   console.log("Admin public key:", admin.publicKey.toBase58()); // Add this line
-
 
    await program.methods
     .initialize()
     .accounts({
-      programState,
+      // programState,
       admin: admin.publicKey,
       // systemProgram: SystemProgram.programId,
     }).rpc()
@@ -148,14 +145,26 @@ describe("proof-of-dicipline", () => {
       program.programId
     )[0]
 
+    // Get initial balances
+    const userInitialBalance = await provider.connection.getBalance(user1.publicKey);
+    const vaultInitialBalance = await provider.connection.getBalance(vault);
+    console.log(userInitialBalance)
+    console.log(vaultInitialBalance)
+
     await program.methods
       .createGoal(goalId, description, stakeAmount, durationDays)
       .accounts({
         user: user1.publicKey,
+        // vault: vault,
         // goal_account: goalAccount,
-        // vault,
         // systemProgram: SystemProgram.programId
       }).signers([user1]).rpc();
+
+      // Get final balances
+      const userFinalBalance = await provider.connection.getBalance(user1.publicKey);
+      const vaultFinalBalance = await provider.connection.getBalance(vault);
+      console.log(userFinalBalance)
+      console.log(vaultFinalBalance)
 
       const goal = await program.account.goalAccount.fetch(goalAccount)
       expect(goal.owner.toBase58()).to.equal(user1.publicKey.toBase58())
@@ -166,5 +175,94 @@ describe("proof-of-dicipline", () => {
       expect(goal.isActive).to.be.true;
       expect(goal.checkIns.length).to.equal(0);
       expect(goal.totalRewardPool.toNumber()).to.equal(0);
+
+      // Verify SOL transfer to vault
+      expect(vaultFinalBalance - vaultInitialBalance).to.equal(stakeAmount.toNumber());
+
+      // Verify user's balance decreased (accounting for transaction fees)
+      const expectedUserBalanceDecrease = stakeAmount.toNumber(); // Not accounting for fees for simplicity
+      expect(userInitialBalance - userFinalBalance).to.be.greaterThanOrEqual(expectedUserBalanceDecrease);
+  })
+
+
+  it("Submits a check-in", async () => {
+    const goalAccount = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from('goal'), Buffer.from(goalId), user1.publicKey.toBuffer()],
+      program.programId
+    )[0]
+
+    await program.methods
+      .checkIn()
+      .accounts({
+        goalAccount,
+        owner: user1.publicKey
+      }).signers([user1]).rpc()
+
+      const goal = await program.account.goalAccount.fetch(goalAccount)
+      expect(goal.checkIns.length).to.equal(1);
+      expect(goal.lastCheckIn.toNumber()).to.be.greaterThan(0);
+  })
+
+  it("Fails to check-in twice in one day", async () => {
+    const goalAccount = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("goal"), Buffer.from(goalId), user1.publicKey.toBuffer()],
+      program.programId
+    )[0]
+
+    try {
+      await program.methods
+        .checkIn()
+        .accounts({
+          goalAccount,
+          owner: user1.publicKey
+        }).signers([user1]).rpc()
+
+      expect.fail("Should have failed due to already checked in");
+    } catch (err) {
+      expect(err.error.errorCode.code).to.equal("AlreadyCheckedIn");
+    }
+  })
+
+  it("Penalizes a missed check-in", async () => {
+    const goalAccount = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("goal"), Buffer.from(goalId), user1.publicKey.toBuffer()],
+      program.programId
+    )[0]
+
+    const vault = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("vault"), goalAccount.toBuffer()],
+      program.programId
+    )[0]
+
+    //Simulate missing a check-in
+    await advanceTime(4); // 2 days
+
+    // const now = Math.floor(Date.now() / 1000);
+    // const twoDaysAgo = now - (2 * 86400);
+
+    // await program.methods
+    //   .testSetLastCheckIn(new anchor.BN(twoDaysAgo))
+    //   .accounts({
+    //     goalAccount,
+    //     vault
+    //   }).rpc()
+
+    await program.methods
+      .penalizeMissedCheckIn()
+      .accounts({
+        goalAccount,
+        vault,
+      }).rpc()
+
+      const goal = await program.account.goalAccount.fetch(goalAccount)
+      console.log("Goal State after penalization:", {
+        isActive: goal.isActive,
+        totalRewardPool: goal.totalRewardPool.toString(),
+        stakeAmount: goal.stakeAmount.toString(),
+      });
+
+      expect(goal.isActive).to.be.false;
+      expect(goal.totalRewardPool.toNumber()).to.equal(stakeAmount.toNumber());
   })
 });
+
